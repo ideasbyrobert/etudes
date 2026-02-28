@@ -1,10 +1,10 @@
 'use strict'
 
-const { Momento } = require('./momento')
+const { Memento } = require('./memento')
 
 async function main()
 {
-    const state = new Momento()
+    const state = new Memento()
 
     await state.update('counter', 42)
     await state.update('user', {name: 'Alice', role: 'admin'})

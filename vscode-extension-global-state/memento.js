@@ -1,6 +1,6 @@
 "use strict"
 
-class Momento 
+class Memento 
 {
   constructor() 
   {
@@ -35,4 +35,4 @@ class Momento
   }
 }
 
-module.exports = { Momento }
+module.exports = { Memento }
