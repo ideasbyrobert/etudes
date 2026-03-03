@@ -38,7 +38,7 @@ class Memento
 
     if(this._onUpdate)
     {
-      return this._onUpdate(this._namespace, this._snapshot())
+      return this._onUpdate(this._namespace, this._snapshot(), key)
     }
 
     return Promise.resolve()

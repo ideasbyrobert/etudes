@@ -1,13 +1,9 @@
 {
   "acme.todo-manager": {
-    "count": 42,
-    "label": "My Tasks",
-    "theme": "dark",
-    "lastSync": "2026-03-01",
-    "apiToken": "secret-abc-123"
+    "count": 999,
+    "label": "Tasks"
   },
   "contoso.analytics": {
-    "endpoint": "https://api.contoso.com",
-    "sessionId": "sess-xyz"
+    "endpoint": "https://api.contoso.com"
   }
 }

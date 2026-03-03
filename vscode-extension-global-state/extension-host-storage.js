@@ -3,6 +3,7 @@
 const { Memento } = require('./memento')
 const { StorageBackend } = require('./storage-backend')
 const { FlushScheduler } = require('./flush-scheduler')
+const { StorageEventEmitter } = require('./storage-event-emitter')
 
 const DEFAULT_FLUSH_DELAY_MS = 100
 
@@ -19,6 +20,8 @@ class ExtensionHostStorage
             () => this._flushAll(),
             flushDelayMs !== undefined ? flushDelayMs : DEFAULT_FLUSH_DELAY_MS
         )
+
+        this._emitter = new StorageEventEmitter()
     }
 
     getMemento(extensionId)
@@ -32,7 +35,7 @@ class ExtensionHostStorage
 
         const memento = new Memento(
             data,
-            (namespace, cacheSnapshot) => this._onMementoUpdate(namespace, cacheSnapshot),
+            (namespace, cacheSnapshot, key) => this._onMementoUpdate(namespace, cacheSnapshot, key),
             extensionId
         )
 
@@ -40,9 +43,16 @@ class ExtensionHostStorage
         return memento
     }
 
-    _onMementoUpdate(namespace, cacheSnapshot)
+    _onMementoUpdate(namespace, cacheSnapshot, key)
     {
         this._store[namespace] = cacheSnapshot
+
+        this._emitter.emit({
+            extensionId: namespace,
+            key: key,
+            value: cacheSnapshot[key]
+        })
+
         return this._scheduler.schedule()
     }
 
@@ -59,6 +69,11 @@ class ExtensionHostStorage
     get scheduler()
     {
         return this._scheduler
+    }
+
+    onDidChangeStorage(listener)
+    {
+        return this._emitter.on(listener)
     }
 
     getSyncData()

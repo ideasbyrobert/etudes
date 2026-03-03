@@ -6,7 +6,7 @@ const { ExtensionHostStorage } = require('./extension-host-storage')
 
 const STORAGE_PATH = path.join(__dirname, 'data', 'globalState.json')
 
-function clean()
+async function main()
 {
     try
     {
@@ -15,35 +15,55 @@ function clean()
     catch(e)
     {
     }
-}
-
-async function main()
-{
-    console.log('=== Sync Registry Basics ===')
-    clean()
 
     const host = new ExtensionHostStorage(STORAGE_PATH, 50)
     const extA = host.getMemento('acme.todo-manager')
     const extB = host.getMemento('contoso.analytics')
 
-    const promises = []
-
-    promises.push(extA.update('count', 42))
-    promises.push(extA.update('label', 'My Tasks'))
-    promises.push(extA.update('theme', 'dark'))
-    promises.push(extA.update('lastSync', '2026-03-01'))
-    promises.push(extA.update('apiToken', 'secret-abc-123'))
-    promises.push(extB.update('endpoint', 'https://api.contoso.com'))
-    promises.push(extB.update('sessionId', 'sess-xyz'))
-
-    await Promise.all(promises)
-
-    extA.setKeysForSync(['count', 'theme'])
+    extA.setKeysForSync(['count'])
     extB.setKeysForSync(['endpoint'])
 
-    const payload = host.getSyncData()
-    console.log('Full sync payload across all extensions:')
-    console.log(JSON.stringify(payload, null, 2))
+    const events = []
+    const syncSnapshots = []
+    let writeCountAtLastEvent = -1
+
+    const dispose = host.onDidChangeStorage((event) => {
+        events.push(event)
+        writeCountAtLastEvent = host.backend.writeCount
+
+        const memento = host.getMemento(event.extensionId)
+        if(memento.keysForSync.includes(event.key))
+        {
+            syncSnapshots.push(host.getSyncData())
+        }
+    })
+
+    const promises = []
+    promises.push(extA.update('count', 42))
+    promises.push(extA.update('label', 'Tasks'))
+    promises.push(extA.update('count', 99))
+    promises.push(extB.update('endpoint', 'https://api.contoso.com'))
+    promises.push(extA.update('count', 111))
+    await Promise.all(promises)
+
+    console.log('Events received:', events.length)
+    for (const e of events)
+        console.log(`  ${e.extensionId} -> "${e.key}" = ${JSON.stringify(e.value)}`)
+
     console.log('')
+    console.log('Sync triggered', syncSnapshots.length, 'times (only on synced "count":')
+    for (const s of syncSnapshots)
+        console.log(' ', JSON.stringify(s))
+
+    console.log('')
+    console.log('Write count when last event fired:', writeCountAtLastEvent)
+    console.log('Write count now:', host.backend.writeCount)
+    console.log('Each event fires before its own flush completes - listeners see in-memory state, not disk.')
+
+    console.log('')
+    const countBefore = events.length
+    dispose()
+    await extA.update('count', 999)
+    console.log('Events after dispose:', events.length, '(unchanged from', countBefore + ')')
 }
 main().catch(console.error)
