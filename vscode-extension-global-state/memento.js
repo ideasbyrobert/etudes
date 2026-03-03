@@ -2,68 +2,58 @@
 
 class Memento 
 {
-  constructor(backend, namespace) 
+  constructor(initialData, onUpdate, namespace)
   {
     this._cache = new Map()
-    this._backend = backend || null
+    this._onUpdate = onUpdate || null
     this._namespace = namespace || null
 
-    if(this._backend)
+    if (initialData)
     {
-      const store = this._backend.load()
-      const data = this._namespace ? (store[this._namespace] || {}) : store
-      for (const [key, value] of Object.entries(data))
-        this._cache.set(key, value)
+      for (const [key, value] of Object.entries(initialData))
+          this._cache.set(key, value)
     }
   }
 
-  get(key, defaultValue) 
+  get(key, defaultValue)
   {
-    if (this._cache.has(key)) 
+    if(this._cache.has(key))
     {
       return this._cache.get(key)
     }
     return defaultValue
   }
 
-  update(key, value) 
+  update(key, value)
   {
-    if (value == undefined) 
+    if (value === undefined)
     {
       this._cache.delete(key)
-    } 
-    else 
+    }
+    else
     {
       this._cache.set(key, value)
     }
 
-    if (this._backend)
+    if(this._onUpdate)
     {
-      return this._flush()
+      return this._onUpdate(this._namespace, this._snapshot())
     }
 
     return Promise.resolve()
   }
 
-  keys() 
+  keys()
   {
     return Array.from(this._cache.keys())
   }
 
-  _flush()
+  _snapshot()
   {
     const data = {}
     for (const [key, value] of this._cache)
       data[key] = value
-
-    if(this._namespace)
-    {
-      const store = this._backend.load()
-      store[this._namespace] = data
-      return this._backend.save(store)
-    }
-
-    return this._backend.save(data)
+    return data
   }
 }
 
