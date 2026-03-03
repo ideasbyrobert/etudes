@@ -7,6 +7,7 @@ class Memento
     this._cache = new Map()
     this._onUpdate = onUpdate || null
     this._namespace = namespace || null
+    this._keysForSync = new Set()
 
     if (initialData)
     {
@@ -46,6 +47,29 @@ class Memento
   keys()
   {
     return Array.from(this._cache.keys())
+  }
+
+  setKeysForSync(keys)
+  {
+    this._keysForSync = new Set(keys)
+  }
+
+  syncSnapshot()
+  {
+    const data = {}
+    for (const key of this._keysForSync)
+    {
+      if(this._cache.has(key))
+      {
+        data[key] = this._cache.get(key)
+      }
+    }
+    return data
+  }
+
+  get keysForSync()
+  {
+    return Array.from(this._keysForSync)
   }
 
   _snapshot()

@@ -60,6 +60,23 @@ class ExtensionHostStorage
     {
         return this._scheduler
     }
+
+    getSyncData()
+    {
+        const syncPayload = {}
+
+        for (const [extensionId, memento] of this._mementos)
+        {
+            const snapshot = memento.syncSnapshot()
+
+            if (Object.keys(snapshot).length > 0)
+            {
+                syncPayload[extensionId] = snapshot
+            }
+        }
+
+        return syncPayload
+    }
 }
 
 module.exports = { ExtensionHostStorage }
