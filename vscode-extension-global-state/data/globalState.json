@@ -1,16 +1,9 @@
 {
   "acme.todo-manager": {
-    "key-0": "value-a-0",
-    "key-1": "value-a-1",
-    "key-2": "value-a-2",
-    "key-3": "value-a-3",
-    "key-4": "value-a-4"
+    "baseline": "a-exists"
   },
   "contoso.analytics": {
-    "key-0": "value-b-0",
-    "key-1": "value-b-1",
-    "key-2": "value-b-2",
-    "key-3": "value-b-3",
-    "key-4": "value-b-4"
+    "baseline": "b-exists",
+    "after-race": "b-wrote-this"
   }
 }
