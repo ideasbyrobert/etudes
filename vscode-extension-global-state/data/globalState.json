@@ -1,9 +1,0 @@
-{
-  "acme.todo-manager": {
-    "count": 999,
-    "label": "Tasks"
-  },
-  "contoso.analytics": {
-    "endpoint": "https://api.contoso.com"
-  }
-}
