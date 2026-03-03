@@ -1,33 +1,58 @@
 'use strict'
 
+const path = require('path')
+const fs = require('fs')
 const { Memento } = require('./memento')
+const { StorageBackend } = require('./storage-backend')
+
+const STORAGE_PATH = path.join(__dirname, 'data', 'globalState.json')
 
 async function main()
 {
-    const state = new Memento()
+    try 
+    {
+        fs.unlinkSync(STORAGE_PATH)
+    }
+    catch(e)
+    {
+    }
+
+    const backend = new StorageBackend(STORAGE_PATH)
+    const state = new Memento(backend)
+
+    console.log('=== Writing 5 keys (naive immediate flush) ===')
+    console.log('Write count before:', backend.writeCount)
 
     await state.update('counter', 42)
     await state.update('user', {name: 'Alice', role: 'admin'})
     await state.update('tags', ['alpha', 'beta', 'gamma'])
     await state.update('enabled', true)
+    await state.update('threshold', 0.85)
 
-    console.log('counter:', state.get('counter'))
-    console.log('user:', state.get('user'))
-    console.log('tags:', state.get('tags'))
-    console.log('enabled', state.get('enabled'))
+    console.log('Write count after:', backend.writeCount)
+    console.log('')
 
-    console.log('missing (no default):', state.get('nonexistent'))
-    console.log('missing (with default):', state.get('nonexistent', 'fallback'))
+    console.log('=== Raw file on disk ===')
+    console.log(fs.readFileSync(STORAGE_PATH, 'utf-8'))
+    console.log('')
 
-    console.log('keys:', state.keys())
+    console.log('=== Simulating process restart ===')
+    const backend2 = new StorageBackend(STORAGE_PATH)
+    const state2 = new Memento(backend2)
 
-    await state.update('tags', undefined)
-    console.log('keys after delete:', state.keys())
-    console.log('tags after delete:', state.get('tags', 'GONE'))
+    console.log('keys after restart:', state2.keys())
+    console.log('counter:', state2.get('counter'))
+    console.log('user:', state2.get('user'))
+    console.log('tags:', state2.get('tags'))
+    console.log('')
 
-    const result = state.update('test', 'abc')
-    console.log('update() returns', result)
-    console.log('update() is thenable:', typeof result.then === 'function')
+    await state2.update('tags', undefined)
+    console.log('Write count for restart instance', backend2.writeCount)
+
+    const backend3 = new StorageBackend(STORAGE_PATH)
+    const state3 = new Memento(backend3)
+    console.log('keys after delete + restart:', state3.keys())
+    console.log('tags after delete + restart:', state3.get('tags', 'GONE'))
 }
 
 main().catch(console.error)

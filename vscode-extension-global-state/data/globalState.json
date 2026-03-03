@@ -1,0 +1,9 @@
+{
+  "counter": 42,
+  "user": {
+    "name": "Alice",
+    "role": "admin"
+  },
+  "enabled": true,
+  "threshold": 0.85
+}
