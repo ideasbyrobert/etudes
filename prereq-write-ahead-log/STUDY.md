@@ -1,81 +1,83 @@
-# Study Framing
+# prereq-write-ahead-log
 
 ## Subject
 
-The write-ahead log — an append-only file persistence mechanism with binary record framing, byte-offset indexing, and checksum-guarded crash recovery, implemented using Node.js `fs` built-in module.
+Append-only sequential log with explicit byte-offset tracking, serving as both a crash-recovery mechanism and an offset-addressable entry store.
 
 ## Core Question
 
-What specific mechanical properties of sequential file appends — compared to random-access in-place mutation — enable a write-ahead log to simultaneously achieve crash recovery, data integrity verification, and write throughput that approaches the raw sequential bandwidth of the storage device? And what is the precise cost structure (fsync latency, checksum computation, replay time) that governs the boundary between data safety and performance?
+What makes sequential append to a log file both safer under crash and faster under load than in-place mutation of a data file, what is the minimum mechanism required to recover consistent state from such a log after unexpected process termination, and why does the append-only constraint make byte offsets a sufficient addressing scheme — eliminating the need for a separate index to locate entries?
 
 ## Hypothesis
 
-> **[YOUR HYPOTHESIS HERE]**
->
-> Before writing any code, document your current mental model of how a write-ahead log works. Specifically:
->
-> 1. **Record format**: How do you think individual records are stored in the file? What metadata accompanies each payload?
-> 2. **Write path**: What happens mechanically when a new record is appended? What makes this cheaper than modifying an existing record in place?
-> 3. **Durability boundary**: When is data "safe"? What is the difference between the OS reporting a successful `write()` and the data actually surviving a power failure?
-> 4. **Crash recovery**: If the process crashes mid-write, how does the system distinguish complete records from corrupted partial writes when it restarts?
-> 5. **Throughput**: Why is sequential I/O fundamentally faster than random I/O on both spinning disks and SSDs?
->
-> Write your answers before proceeding. They will be revisited in Phase 4.
+I believe that an append-only, length-prefixed log can durably represent a system's current state by acting as a deterministic ledger of state transitions. This sequential ledger is mechanically safer and faster to recover from than maintaining a "current state" data file that relies on in-place overwrites. Furthermore, I believe the append-only property gives the log a structural advantage beyond durability: the byte offset of each entry is a permanent, stable address that never changes, making the log self-indexing without any auxiliary data structure.
+
+Concretely, I expect the following mechanical behaviors:
+
+- **Torn-Write Detection via Length Framing:** If the process dies mid-append, the WAL file will end with an incomplete record. By framing every entry with a `u32` (a strict 4-byte unsigned integer) that declares the exact payload length, the recovery parser can detect two distinct failure modes. First, if the parser cannot read a complete 4-byte length header before hitting EOF, the length frame itself was torn — it discards the partial bytes. Second, if the parser reads a complete length header but hits EOF before consuming the promised number of payload bytes, the payload was torn — it discards the header and the partial payload. In both cases, the parser truncates the file to the end of the last complete entry, restoring the log to a consistent state.
+
+- **The Vanished-Write Problem:** There is a third failure mode distinct from torn writes. If the process calls `write()` (which only copies data into the OS page cache) but crashes before calling `fsync()`, the entry may never reach the physical storage device at all. In this case, the file on disk ends cleanly at a prior entry boundary — there is no torn record to detect. The entry simply does not exist. This means the parser will report a consistent log, but one that is missing the last committed operation. Any operation that the application treated as "successful" before the fsync boundary is, in reality, a lie. Durability requires fsync; write() alone provides only ordering.
+
+- **The `fsync` Durability Boundary:** A standard `write()` call only pushes data into the operating system's volatile RAM page cache. `fsync` is the explicit system call that forces the OS to flush the page cache to the physical storage hardware. An entry is only genuinely durable — guaranteed to survive power loss — after `fsync` completes. Therefore, the commit protocol is: append the entry, then fsync, then acknowledge success. Any acknowledgment before fsync is a durability gamble.
+
+- **Sequential vs. Random I/O:** Sequential appends to the end of a log file will outperform in-place updates to a data file. Appending avoids disk-head seeks (on HDDs) and minimizes write-amplification (on SSDs), whereas in-place overwrites force random I/O patterns. However, I suspect that under our per-entry fsync regime, the fsync latency will dominate the I/O pattern advantage. Each fsync forces a round-trip to the storage hardware (typically 0.5–2ms on consumer SSDs), which means the sequential advantage may be real but invisible at our measurement granularity. This is the design pressure that drives production systems toward group commit and batched fsync — amortizing the durability cost across many entries.
+
+- **Why Not Just Fsync the Data File:** Even for a simple key-value store, in-place mutation of a data file is structurally unsafe or prohibitively expensive. If the new value differs in size from the old value, an in-place overwrite requires shifting all subsequent bytes — an O(N) operation that is itself non-atomic (a crash mid-shift corrupts the file). The alternative — fixed-size records — wastes space and caps value size. The WAL sidesteps the problem entirely: it never mutates existing bytes, only appends new ones. The in-memory `Map` is the "current state," and the log is the recipe for reconstructing it. The data file mutation problem simply does not arise.
+
+- **Offset Stability as Zero-Cost Addressing:** In an append-only file, once an entry is written at byte offset X, that entry will be at byte offset X for the lifetime of the file. No bytes before it will ever be inserted, deleted, or resized. This makes the byte offset a permanent, content-independent identifier — the equivalent of a primary key — generated for free at write time (it is just the file's length before the append). In a mutable file, any insertion or deletion shifts subsequent bytes, invalidating all previously-recorded offsets and necessitating a separate index (e.g., a B-tree) to map logical identifiers to physical positions. The append-only log needs no such index. This is the structural property that allows a downstream system like Kafka to use the byte offset as a message ID: consumers store a single integer (their current offset) and can resume consumption from any point in the log by seeking directly to that byte position.
 
 ## Scope Boundary
 
-**Included:**
-- Binary record framing: length-prefixed records with CRC-32 checksums, packed into `Buffer` objects
-- Append-only sequential writes via Node.js `fs` — using file descriptors and explicit byte-offset tracking
-- In-memory offset index: mapping logical sequence numbers to physical byte positions in the log file
-- `fsync` as the durability primitive — the mechanical difference between "written to the OS page cache" and "durable on storage media"
-- Crash recovery: re-scanning the log file from byte 0, reconstructing the in-memory index, detecting and truncating incomplete trailing records via CRC validation
-- Group commit: batching multiple logical writes behind a single `fsync` call to amortize the cost of forced disk flushes
+This study intentionally excludes the following. Each exclusion is a simplification with known consequences.
 
-**Excluded and why:**
-- **Log compaction / garbage collection**: The WAL in this study grows without bound. Truncation, checkpointing, and segment rotation are optimization concerns addressed by consumers of this prerequisite (specifically `lsm-tree`, where checkpointing the memtable allows truncating the WAL). Excluding compaction keeps the study focused on the append-only write path and crash recovery mechanism.
-- **Log segmentation**: Production WALs (PostgreSQL's 16MB segment files, Kafka's configurable log segments) split the log into fixed-size segments for operational manageability. This study uses a single file to isolate the core append/recovery mechanics from file management concerns.
-- **Replication**: Shipping WAL records to remote replicas is a distributed consensus concern. PostgreSQL's streaming replication sends WAL bytes to standbys; Kafka replicates log segments across brokers. Both are covered architecturally in `raft-consensus`. This study operates on a single node.
-- **Logical vs. physical logging**: PostgreSQL distinguishes between logical WAL records (high-level operation descriptions for logical replication) and physical WAL records (raw page diffs for crash recovery). This study uses a simplified record model — opaque key-value payloads — to isolate the mechanical I/O properties from the semantic content of records.
-- **Undo logging / ARIES recovery**: Full database recovery protocols (ARIES) combine redo and undo logs with fuzzy checkpointing. This study implements only the redo (replay-forward) path, which is sufficient to expose the core WAL mechanism and is the variant used by Redis AOF and Kafka.
-- **Compression**: Record-level or segment-level compression (e.g., Kafka's `RecordBatch` compression) is a throughput optimization that obscures the raw I/O mechanics under study.
+**Log compaction / segmentation.** Production WALs do not grow forever. PostgreSQL creates checkpoints (`CreateCheckPoint()` in `xlog.c`) that allow old WAL segments to be recycled. Redis performs AOF rewrite (`rewriteAppendOnlyFile()` in `aof.c`). Kafka splits the log into time- or size-bounded segments (`LogSegment` in `log/LogSegment.scala`) enabling efficient retention enforcement. Excluded because compaction addresses a separate design pressure — space reclamation vs. recovery completeness — that is orthogonal to the core append-and-replay mechanism. Consequence: our log grows without bound.
+
+**Concurrent writers.** PostgreSQL serializes WAL insertions using `WALInsertLock`, an array of LWLocks managed in `xlog.c`. Kafka partitions are single-writer by design (only the partition leader appends). We use a single writer to isolate the sequential I/O mechanism from concurrency control. Consequence: no contention, no need for insertion locking.
+
+**Group commit / batched fsync.** PostgreSQL batches multiple transactions' durability guarantees through `XLogFlush()` and the `commit_delay` GUC parameter. Redis offers `appendfsync` with modes `always`, `everysec`, and `no`. Kafka uses `log.flush.interval.messages` and `log.flush.interval.ms` to batch fsyncs. We fsync per entry to expose the raw cost of durability. Consequence: our throughput will be significantly lower than a production WAL that amortizes fsync across multiple entries.
+
+**Log shipping / replication.** WAL records can be streamed to replicas (PostgreSQL streaming replication via `walsender.c`, FoundationDB's log server role, Kafka ISR replication). Excluded because replication is a distributed systems concern, not a local I/O mechanism.
+
+**Full CRC checksumming.** PostgreSQL computes CRC-32C for each WAL record (via `pg_crc32c` defined in `pg_crc32c.h`). Kafka computes CRC-32C per record batch (`DefaultRecordBatch` in `record/DefaultRecordBatch.java`). We use length-prefixed entries for torn-write detection instead. This catches truncation (process died mid-write) but not bit-rot or silent data corruption. The gap is deliberate: our study targets crash recovery, not storage-layer fault tolerance.
+
+**Consumer offset persistence.** Kafka consumers persist their offsets externally (historically in ZooKeeper, now in the `__consumer_offsets` internal topic). Our WAL exposes the read-at-offset and scan-from-offset interface, but does not persist consumer cursors. That is a downstream concern for the `kafka-partitioning` étude.
 
 ## Prerequisites
 
-**None identified.**
+None. This is a prerequisite étude (depth 0). All dependencies are inlined:
 
-Rationale: This étude is itself a prerequisite building block. All required primitives are native to Node.js:
-- `fs` module provides file descriptors, `writeSync`, `readSync`, and `fsyncSync` — the complete low-level I/O surface needed.
-- `crypto` module provides `crc32` (Node.js 22+) or a hand-rolled CRC-32 using the polynomial — no external library required.
-- `Buffer` provides direct byte-level packing for the record frame (length prefix, CRC, payload) — this is the exact abstraction needed for binary record framing.
+- **Key-value state**: A JavaScript `Map` serving as the in-memory state that the log protects. No invariants beyond get/set/delete. Inlined.
+- **Binary entry encoding**: Length-prefixed `Buffer` operations (`writeUInt32BE`, `readUInt32BE`, `Buffer.alloc`). Straightforward serialization with no complex invariants. Inlined.
+- **File I/O**: Node.js built-in `fs` module (synchronous operations for clarity, then async where the mechanism demands it). No external dependency.
 
-No data structure with non-trivial invariants is required. The in-memory index is a flat array of `{ sequenceNumber, byteOffset }` entries — explainable in under two minutes.
+## Module Interface
 
-## Real-System Correspondence Map
+This étude is a reusable building block. It must export a clean API via `module.exports` that downstream études (`lsm-tree`, `kafka-partitioning`) can `require()`. The interface must support:
 
-This section maps each mechanism in the study to its concrete location in production systems. These correspondences will be cited during implementation (Phase 3) as each mechanism is built.
+- **`append(entry)`** → returns the byte offset where the entry was written.
+- **`readAt(offset)`** → returns the entry at that offset and the offset of the next entry.
+- **`scanFrom(offset, callback)`** → iterates entries sequentially from a given offset.
+- **`replay()`** → scans from offset 0, reconstructing state. Alias for `scanFrom(0, ...)` specialized for crash recovery.
 
-| Mechanism | PostgreSQL WAL | Redis AOF | FoundationDB |
-|---|---|---|---|
-| Record framing | `XLogRecord` struct in `src/include/access/xlogrecord.h` — contains `xl_tot_len` (total byte length), `xl_prev` (byte offset to previous record), and CRC-32C checksum | RESP protocol commands appended as text lines (`*3\r\n$3\r\nSET\r\n...`) — no binary framing, relies on protocol structure | Binary mutation log records in the storage engine |
-| Append path | `XLogInsertRecord()` in `src/backend/access/transam/xlog.c` copies records into shared WAL buffers | `feedAppendOnlyFile()` in `src/aof.c` serializes commands and calls `aofWrite()` | Storage server appends mutations to an on-disk log before applying to the B-tree |
-| fsync policy | `XLogFlush()` — called at commit; `wal_sync_method` controls `fsync`/`fdatasync`/`open_sync` strategy | `appendfsync` config: `always` (fsync every write), `everysec` (background fsync), `no` (OS decides) — directly governs the durability-throughput knob | Durable writes require disk sync before acknowledging commits to the transaction system |
-| Crash recovery | `StartupXLOG()` in `xlog.c` reads forward from the last checkpoint, validates CRC per record, replays redo operations | `loadAppendOnlyFiles()` in `aof.c` replays commands sequentially; truncates trailing corrupt bytes on `aof-use-rdb-preamble no` | Replays the mutation log from the last durable snapshot to rebuild in-memory state |
-| Checksum | CRC-32C computed over the record body (data + header fields), stored in `xl_crc` | No per-entry checksum; relies on file-level fsync and optional RDB checksums | CRC validation on log records during recovery |
-| Group commit | `CommitTransaction()` sets LSN; `XLogFlush()` batches pending WAL writes behind a single fsync — multiple concurrent transactions share one disk flush | `everysec` mode batches all writes in a 1-second window behind a single background `fsync` | Batches durable sync across multiple concurrent commits for throughput |
+## Brand Mapping
+
+- **Redis AOF** (Append Only File): `src/aof.c` — Redis logs every write command as a protocol-formatted string appended to the AOF file. Recovery replays the file as a sequence of commands. Corresponds to our replay-from-zero recovery path.
+- **PostgreSQL WAL** (Write-Ahead Log): `src/backend/access/transam/xlog.c` — PostgreSQL writes WAL records before modifying data pages. Each record has a Log Sequence Number (LSN) that is its byte offset in the WAL stream. Recovery replays WAL from the last checkpoint's LSN. Corresponds to both our offset-tracking and recovery mechanisms.
+- **Kafka Log**: `core/src/main/scala/kafka/log/LogSegment.scala` — Kafka appends record batches to segment files. Each batch has a base offset. Consumers fetch by offset, and the broker seeks directly to the byte position. Corresponds to our read-at-offset and scan-from-offset interface.
+- **FoundationDB**: Uses a distributed WAL architecture where transaction logs are written to dedicated log server processes before being applied to storage servers.
 
 ## Design Pressures Discovered
 
-> *To be completed during Phase 3 and finalized in Phase 4.*
+*To be completed after implementation.*
 
 ## Mental Model Corrections
 
-> *To be completed in Phase 4.*
+*To be completed after implementation.*
 
 ## Connections
 
-> *To be completed in Phase 4.*
+*To be completed after implementation.*
 
 ## Divergences
 
-> *To be completed after verification against the real system.*
+*To be completed after verification against the real system.*
