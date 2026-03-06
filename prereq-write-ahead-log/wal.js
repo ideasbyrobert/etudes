@@ -36,6 +36,33 @@ class WAL
         }
     }
 
+    scanFrom(startOffset, callback)
+    {
+        const fileSize = fs.fstatSync(this.fd).size
+        let current = startOffset
+
+        while (current + Record.HEADER_SIZE < fileSize)
+        {
+            const headerBuf = Buffer.allocUnsafe(Record.HEADER_SIZE)
+            fs.readSync(this.fd, headerBuf, 0, Record.HEADER_SIZE, current)
+
+            const length = headerBuf.readUInt32BE(0)
+
+            if (current + Record.HEADER_SIZE + length > fileSize)
+            {
+                break
+            }
+
+            const payloadBuf = Buffer.allocUnsafe(length)
+            fs.readSync(this.fd, payloadBuf, 0, length, current + Record.HEADER_SIZE)
+
+            callback(current, payloadBuf.toString('utf8'))
+            current += Record.HEADER_SIZE + length
+        }
+
+        return current
+    }
+
     close()
     {
         fs.closeSync(this.fd)
