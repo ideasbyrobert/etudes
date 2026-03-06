@@ -21,6 +21,21 @@ class WAL
         return writeOffset
     }
 
+    readAt(offset)
+    {
+        const headerBuf = Buffer.allocUnsafe(Record.HEADER_SIZE)
+        fs.readSync(this.fd, headerBuf, 0, Record.HEADER_SIZE, offset)
+
+        const length = headerBuf.readUInt32BE(0)
+        const payloadBuf = Buffer.allocUnsafe(length)
+        fs.readSync(this.fd, payloadBuf, 0, length, offset + Record.HEADER_SIZE)
+
+        return {
+            payload: payloadBuf.toString('utf8'),
+            nextOffset: offset + Record.HEADER_SIZE + length,
+        }
+    }
+
     close()
     {
         fs.closeSync(this.fd)
