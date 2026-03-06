@@ -22,5 +22,10 @@
 - **What I built**: A `readAt(offset)` method on the `WAL` class that performs a two-phase positional read (`fs.readSync`) to fetch the header, decode the length, and fetch the payload, returning both the data and the `nextOffset`.
 - **What I learned**: Because the log is append-only, jumping to an exact byte offset completely eliminates the need for an external index. A consumer only needs to store a single integer (its current offset) to resume reading exactly where it left off, making record retrieval an O(1) operation directly against the filesystem.
 
+## Step 5: Scan from an arbitrary offset to end-of-log
+- **Date**: 2026-03-06
+- **What I built**: A `scanFrom(startOffset, callback)` method that sequentially traverses the log using iterative positional reads, stopping safely at the physical end of the file.
+- **What I learned**: Both database crash recovery and message broker consumer resumption rely on the exact same sequential iteration primitive. The only difference is the starting byte offset. Furthermore, the scanning loop inherently anticipates torn-write logic: by evaluating the promised payload length against the physical EOF boundary, the parser starves safely instead of throwing out-of-bounds read errors.
+
 
 
