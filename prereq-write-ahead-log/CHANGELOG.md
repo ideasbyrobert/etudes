@@ -17,4 +17,10 @@
 - **What I learned**: By querying the file size on instantiation, the WAL can safely resume appending after a restart without losing its exact positional tracking. Passing the known byte offset into the `writeSync` positional argument formally maps the logical concept of a "message ID" to the physical reality of a byte address on disk.
 - **Model correction**: I hadn't considered that the byte offset isn't something generated *after* a write; it is simply the deterministic state of the file length at the exact moment *before* the write occurs. 
 
+## Step 4: Read a single entry at a byte offset
+- **Date**: 2026-03-05
+- **What I built**: A `readAt(offset)` method on the `WAL` class that performs a two-phase positional read (`fs.readSync`) to fetch the header, decode the length, and fetch the payload, returning both the data and the `nextOffset`.
+- **What I learned**: Because the log is append-only, jumping to an exact byte offset completely eliminates the need for an external index. A consumer only needs to store a single integer (its current offset) to resume reading exactly where it left off, making record retrieval an O(1) operation directly against the filesystem.
+
+
 
