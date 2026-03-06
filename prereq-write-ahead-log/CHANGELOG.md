@@ -11,3 +11,10 @@
 - **What I built**: Pure functions to encode a string payload into a `u32` length-prefixed `Buffer`, and to decode it back while calculating the exact byte offset of the next entry.
 - **What I learned**: Big-endian integers (`UInt32BE`) safely serialize the length of a payload into exactly 4 bytes, creating a reliable boundary marker. Concatenating the header and payload buffers in memory ensures the record can later be written to disk in a single atomic system call, while calculating `nextOffset` during decoding provides O(1) traversal through a contiguous block of binary data.
 
+## Step 3: Append entries to a file with byte-offset tracking
+- **Date**: 2026-03-05
+- **What I built**: A `WAL` class that opens a file descriptor, initializes its byte offset using file metadata (`fs.fstatSync`), and sequentially writes encoded binary records while tracking and returning their precise starting offsets.
+- **What I learned**: By querying the file size on instantiation, the WAL can safely resume appending after a restart without losing its exact positional tracking. Passing the known byte offset into the `writeSync` positional argument formally maps the logical concept of a "message ID" to the physical reality of a byte address on disk.
+- **Model correction**: I hadn't considered that the byte offset isn't something generated *after* a write; it is simply the deterministic state of the file length at the exact moment *before* the write occurs. 
+
+
