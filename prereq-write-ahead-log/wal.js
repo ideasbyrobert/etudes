@@ -8,7 +8,12 @@ class WAL
     constructor(filePath)
     {
         this.filePath = filePath
-        WAL.recover(filePath)
+
+        if (fs.existsSync(filePath))
+        {
+            WAL.recover(filePath)
+        }
+
         this.fd = fs.openSync(filePath, 'a+')
         this.offset = fs.fstatSync(this.fd).size
     }
@@ -59,9 +64,14 @@ class WAL
 
             callback(current, payloadBuf.toString('utf8'))
             current += Record.HEADER_SIZE + length
-        }
+            }
 
         return current
+    }
+
+    replay(callback)
+    {
+        return this.scanFrom(0, callback)
     }
 
     static recover(filePath)
