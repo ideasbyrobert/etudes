@@ -70,7 +70,7 @@ class WAL
         const fileSize = fs.fstatSync(fd).size
         let validOffset = 0
 
-        while (validOffset + Record.HEADER_SIZE <= fileSize)
+        while (validOffset < fileSize)
         {
             const headerBuf = Buffer.allocUnsafe(Record.HEADER_SIZE)
             const headerRead = fs.readSync(fd, headerBuf, 0, Record.HEADER_SIZE, validOffset)

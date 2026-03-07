@@ -27,5 +27,12 @@
 - **What I built**: A `scanFrom(startOffset, callback)` method that sequentially traverses the log using iterative positional reads, stopping safely at the physical end of the file.
 - **What I learned**: Both database crash recovery and message broker consumer resumption rely on the exact same sequential iteration primitive. The only difference is the starting byte offset. Furthermore, the scanning loop inherently anticipates torn-write logic: by evaluating the promised payload length against the physical EOF boundary, the parser starves safely instead of throwing out-of-bounds read errors.
 
+## Step 6: Torn-write detection and file repair
+- **Date**: 2026-03-06
+- **What I built**: A static `recover(filePath)` function that scans the log sequentially, detects short reads (torn headers) and boundary mismatches (torn payloads), and uses `fs.ftruncateSync` to physically slice corrupted bytes off the end of the file.
+- **What I learned**: Crash recovery is simply sequential iteration with stricter boundary enforcement. A system can reliably identify a crash if it trusts the length-prefix framing implicitly; if the physical file size ends before the promised length is fulfilled, the write was definitively torn. Running this recovery mechanism before opening the file for appending ensures the system only ever appends to a pristine, consistent state.
+- **Model correction**: I realized that a torn header and a torn payload are mechanically distinct failure modes requiring separate detection logic.
+
+
 
 
