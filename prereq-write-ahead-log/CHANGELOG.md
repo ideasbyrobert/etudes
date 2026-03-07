@@ -33,6 +33,12 @@
 - **What I learned**: Crash recovery is simply sequential iteration with stricter boundary enforcement. A system can reliably identify a crash if it trusts the length-prefix framing implicitly; if the physical file size ends before the promised length is fulfilled, the write was definitively torn. Running this recovery mechanism before opening the file for appending ensures the system only ever appends to a pristine, consistent state.
 - **Model correction**: I realized that a torn header and a torn payload are mechanically distinct failure modes requiring separate detection logic.
 
+## Step 7: Module encapsulation (the WAL class)
+- **Date**: 2026-03-06
+- **What I built**: A comprehensive test suite (`07-test-module.js`) that rigorously exercises the encapsulated `WAL` class interface, verifying `append`, `readAt`, `scanFrom`, `replay`, and static `recover` workflows.
+- **What I learned**: Validating a storage module requires testing the full physical lifecycle—closing, re-opening, and intentionally corrupting files. By proving that the `WAL` class recovers transparently, it guarantees that downstream consumers (like a key-value store) can treat the filesystem as a reliable, logical append-only stream rather than managing raw file descriptors themselves.
+
+
 
 
 
