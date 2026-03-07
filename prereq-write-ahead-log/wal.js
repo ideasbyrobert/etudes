@@ -8,6 +8,7 @@ class WAL
     constructor(filePath)
     {
         this.filePath = filePath
+        WAL.recover(filePath)
         this.fd = fs.openSync(filePath, 'a+')
         this.offset = fs.fstatSync(this.fd).size
     }
@@ -61,6 +62,52 @@ class WAL
         }
 
         return current
+    }
+
+    static recover(filePath)
+    {
+        const fd = fs.openSync(filePath, 'r+')
+        const fileSize = fs.fstatSync(fd).size
+        let validOffset = 0
+
+        while (validOffset + Record.HEADER_SIZE <= fileSize)
+        {
+            const headerBuf = Buffer.allocUnsafe(Record.HEADER_SIZE)
+            const headerRead = fs.readSync(fd, headerBuf, 0, Record.HEADER_SIZE, validOffset)
+
+            if (headerRead < Record.HEADER_SIZE)
+            {
+                console.log('  [recover] Torn header at offset ' + validOffset +
+                    ' (' + headerRead + '/' + Record.HEADER_SIZE + ' bytes). Truncating.')
+                break
+            }
+
+            const length = headerBuf.readUInt32BE(0)
+            const payloadEnd = validOffset + Record.HEADER_SIZE + length
+
+            if (payloadEnd > fileSize)
+            {
+                console.log('  [recover] Torn payload at offset ' + validOffset + 
+                    ' (need ' + length + ' bytes, only ' + (fileSize - validOffset - Record.HEADER_SIZE) +
+                    ' available). Truncating.')
+                break
+            }
+
+            validOffset = payloadEnd
+        }
+
+        if (validOffset < fileSize)
+        {
+            console.log('  [recover] Truncating file from ' + fileSize + ' to ' + validOffset + ' bytes.')
+            fs.ftruncateSync(fd, validOffset)
+        }
+        else 
+        {
+            console.log('   [recover] Log is clean. No truncation needed.')
+        }
+
+        fs.closeSync(fd)
+        return validOffset
     }
 
     close()
