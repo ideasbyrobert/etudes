@@ -43,6 +43,12 @@
 - **What I built**: Added a `{ sync: true }` option to the `WAL`'s append method to trigger `fs.fsyncSync`, and wrote a benchmark to measure the exact latency and throughput differences between buffered writes and durable commits.
 - **What I learned**: A standard file write merely copies bytes into volatile RAM. Forcing the OS to flush those bytes to physical storage introduces a massive performance penalty. My benchmark revealed that buffered writes achieved 194,835 entries/sec while durable writes achieved only 250 entries/sec — a staggering ~779x throughput gap. This "durability tax" is the empirical, foundational reason why production systems cannot afford to `fsync` every individual operation and must instead implement batched group commits.
 
+## Step 9: WAL-protected key-value store
+- **Date**: 2026-03-09
+- **What I built**: A `KVStore` application that maintains an in-memory state `Map` protected by the `WAL` module, enforcing a strict write-ahead protocol before mutating memory.
+- **What I learned**: The write-ahead log fundamentally inverts the relationship between memory and disk. The append-only log is the definitive source of truth, and the in-memory data structure is simply a volatile cache derived from replaying that log. By making intents durable before applying them, the catastrophic data corruption seen in naive in-place file mutation is completely eliminated, even under simulated hardware failure.
+
+
 
 
 
