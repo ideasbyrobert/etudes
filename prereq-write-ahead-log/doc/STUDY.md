@@ -97,16 +97,22 @@ The write-ahead rule — log the intent before performing the mutation, replay o
 - **FoundationDB**: Uses a distributed WAL architecture where transaction logs are written to dedicated log server processes before being applied to the B-tree storage engine on storage servers. On recovery, it replays from the last durable snapshot — the same append-then-apply structure, distributed across dedicated processes.
 
 ## Design Pressures Discovered
-
-*To be completed after implementation.*
+ - **Durability vs. Throughput**: Every persistence system exists on a spectrum between speed and safety, bounded by the electrical constraints of the storage hardware. The WAL makes this tradeoff explicit: buffered writes operate at memory speeds (hundreds of thousands of operations per second), while durable commits demand a physical hardware flush. The empirical ~779x throughput gap measured between sync: false and sync: true is the exact design pressure that forces production systems (like PostgreSQL and Kafka) to implement batched group-commit mechanisms. The cost of absolute truth is massive, and it cannot be optimized away by software.
+ - **Space vs. Safety**: The append-only invariant buys crash recoverability and permanent offset stability by going entirely bankrupt on space. Because the log never reclaims capacity and old values persist indefinitely, the file grows without bound. This is the structural pressure that drives the necessity of downstream eviction strategies—such as compaction (LSM trees), checkpointing (PostgreSQL), and segment rotation (Kafka)—which are direct consequences of the WAL's design.
+ - **Simplicity of Mechanism vs. Breadth of Application**: A single structural primitive—an append-only, length-prefixed, offset-tracked file—serves completely different architectural domains. The WAL module does not know if it is acting as a database crash-recovery ledger (replaying from offset 0) or a message broker topic (reading from an arbitrary consumer offset). The internal scanFrom mechanism is identical; only the starting integer changes.
 
 ## Mental Model Corrections
-
-*To be completed after implementation.*
+ - **The Nature of Data Corruption**: I previously assumed that a mid-write crash resulted in reading "garbled" or mixed bytes. In reality, because systems truncate files before performing in-place overwrites, a crash often results in an entirely empty file or abruptly cut-off JSON. Data loss isn't just dirty data; it is often total structural annihilation.
+ - **The Physical Reality of an Offset**: I previously thought a byte offset was a piece of metadata generated after a write to act as an ID. Implementing positional writes revealed that the offset is simply the deterministic physical length of the file at the exact moment before the write occurs. This reframes Kafka's "offset-as-message-ID" from a logical concept into a zero-cost physical reality.
+ - **Distinct Tear Boundaries**: Before building the recovery parser, I expected torn-write detection to be a single code path. Implementing it revealed two mechanically distinct failure modes: a torn header (short read, failing to acquire the u32) and a torn payload (boundary mismatch, where the physical EOF hits before the promised length).
+ - **The Scale of the Durability Tax**: While I understood fsync would be "expensive," the sheer magnitude of the penalty was surprising. Measuring an empirical ~779x performance collapse shifted fsync from a theoretical bottleneck to a dominating physical constraint.
 
 ## Connections
+ - **WAL → LSM Tree Memtable Recovery**: The foundational mechanism of Log-Structured Merge-trees relies on this exact architecture. The upcoming lsm-tree étude will use the replay() method to reconstruct its volatile memtable after a crash, mirroring the exact KVStore pattern built in Step 9 .
+ - **WAL → Kafka Partition Log**: The kafka-partitioning étude will utilize the exact offset-addressable store pattern built in Steps 3 through 5. It will rely on append() to yield the message ID, readAt() for O(1) fetching, and scanFrom() for sequential consumer traversal.
+ - **Append-Only Immutability → Event Sourcing / Git / Double-Entry Bookkeeping**: The WAL shares a structural philosophy with event sourcing, the Git object model, and accounting ledgers: history is never modified, only appended with new facts. Systemic safety is derived entirely from the physical inability to destroy the past.
+ - **Length-Prefix Framing → Network Protocol Framing**: The WAL's u32 length-prefixed record format is structurally identical to how TCP streams frame data. Protocols like HTTP/2, AMQP (RabbitMQ), and the PostgreSQL wire protocol use this exact same pattern to delimit messages over a continuous byte stream . The WAL is simply protocol framing applied to a storage disk instead of a network socket.
 
-*To be completed after implementation.*
 
 ## Divergences
 
