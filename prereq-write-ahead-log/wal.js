@@ -18,11 +18,17 @@ class WAL
         this.offset = fs.fstatSync(this.fd).size
     }
 
-    append(payload)
+    append(payload, opts)
     {
         const record = Record.encode(payload)
         const writeOffset = this.offset
         fs.writeSync(this.fd, record, 0, record.length, writeOffset)
+
+        if (opts && opts.sync)
+        {
+            fs.fsyncSync(this.fd)
+        }
+
         this.offset += record.length
         return writeOffset
     }

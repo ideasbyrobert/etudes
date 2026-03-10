@@ -38,6 +38,13 @@
 - **What I built**: A comprehensive test suite (`07-test-module.js`) that rigorously exercises the encapsulated `WAL` class interface, verifying `append`, `readAt`, `scanFrom`, `replay`, and static `recover` workflows.
 - **What I learned**: Validating a storage module requires testing the full physical lifecycle—closing, re-opening, and intentionally corrupting files. By proving that the `WAL` class recovers transparently, it guarantees that downstream consumers (like a key-value store) can treat the filesystem as a reliable, logical append-only stream rather than managing raw file descriptors themselves.
 
+## Step 8: The fsync durability boundary
+- **Date**: 2026-03-09
+- **What I built**: Added a `{ sync: true }` option to the `WAL`'s append method to trigger `fs.fsyncSync`, and wrote a benchmark to measure the exact latency and throughput differences between buffered writes and durable commits.
+- **What I learned**: A standard file write merely copies bytes into volatile RAM. Forcing the OS to flush those bytes to physical storage introduces a massive performance penalty. My benchmark revealed that buffered writes achieved 194,835 entries/sec while durable writes achieved only 250 entries/sec — a staggering ~779x throughput gap. This "durability tax" is the empirical, foundational reason why production systems cannot afford to `fsync` every individual operation and must instead implement batched group commits.
+
+
+
 
 
 
